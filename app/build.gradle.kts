@@ -60,6 +60,8 @@ dependencies {
 	implementation("androidx.compose.material3:material3")
 	implementation("androidx.compose.ui:ui")
 	implementation("androidx.compose.ui:ui-tooling-preview")
+	implementation("androidx.datastore:datastore-preferences:1.1.1")
+	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
 	implementation(libs.room.runtime)
 	implementation(libs.room.ktx)
