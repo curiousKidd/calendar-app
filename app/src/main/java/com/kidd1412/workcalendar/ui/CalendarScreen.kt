@@ -1,7 +1,10 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.kidd1412.workcalendar.ui
 
 // Use the shared DataStore extension declared in SettingsScreen.kt
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,11 +19,15 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,8 +55,10 @@ import com.kidd1412.workcalendar.data.KEY_WORK_CYCLE
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.ceil
@@ -110,6 +120,7 @@ fun CalendarScreen(
     var currentYm by remember { mutableStateOf(YearMonth.now()) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val today = LocalDate.now()
+    var showMonthPicker by remember { mutableStateOf(false) }
 
     val dates = remember(currentYm, weekStart) { buildMonthCells(currentYm, weekStart) }
     val monthTitle = remember(currentYm, locale) { "${currentYm.year}년 ${currentYm.monthValue}월" }
@@ -161,11 +172,13 @@ fun CalendarScreen(
                     Text("〈", style = MaterialTheme.typography.titleLarge)
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    monthTitle,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                TextButton(onClick = { showMonthPicker = true }) {
+                    Text(
+                        monthTitle,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = {
                     // 오늘로 이동: 보이는 달/선택 날짜 모두 현재로 갱신
@@ -176,6 +189,34 @@ fun CalendarScreen(
                 }
                 TextButton(onClick = { currentYm = currentYm.plusMonths(1) }) {
                     Text("〉", style = MaterialTheme.typography.titleLarge)
+                }
+            }
+
+            if (showMonthPicker) {
+                val state = rememberDatePickerState()
+                DatePickerDialog(
+                    onDismissRequest = { showMonthPicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val millis = state.selectedDateMillis
+                            if (millis != null) {
+                                val picked =
+                                    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+                                        .toLocalDate()
+                                currentYm = YearMonth.of(picked.year, picked.month)
+                                selectedDate = picked
+                            }
+                            showMonthPicker = false
+                        }) { Text("확인") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showMonthPicker = false }) { Text("취소") }
+                    }
+                ) {
+                    DatePicker(
+                        state = state,
+                        dateFormatter = DatePickerDefaults.dateFormatter(Locale.KOREA)
+                    )
                 }
             }
 
@@ -198,15 +239,35 @@ fun CalendarScreen(
                 }
             }
 
+            var totalVerticalDrag by remember { mutableStateOf(0f) }
+
             // Grid
             LazyVerticalGrid(
                 columns = GridCells.Fixed(7),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.pointerInput(currentYm) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { _, dragAmount ->
+                            totalVerticalDrag += dragAmount
+                        },
+                        onDragEnd = {
+                            val threshold = 80f
+                            when {
+                                totalVerticalDrag <= -threshold -> currentYm =
+                                    currentYm.plusMonths(1)
+
+                                totalVerticalDrag >= threshold -> currentYm =
+                                    currentYm.minusMonths(1)
+                            }
+                            totalVerticalDrag = 0f
+                        },
+                        onDragCancel = { totalVerticalDrag = 0f }
+                    )
+                }
             ) {
                 items(dates) { cell ->
                     when (cell) {
-                        is CalendarCell.Blank -> Spacer(modifier = Modifier.aspectRatio(1f))
                         is CalendarCell.Day -> {
                             val isToday = cell.date == today
                             val isSelected = cell.date == selectedDate
@@ -215,9 +276,7 @@ fun CalendarScreen(
 
                             val textStyle = if (inThisMonth) MaterialTheme.typography.bodyLarge else
                                 MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.35f
-                                    )
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                                 )
 
                             val cycle = workCycleLabel(cell.date, savedCycle)
@@ -241,6 +300,10 @@ fun CalendarScreen(
                                 colors = CardDefaults.outlinedCardColors(containerColor = containerColor),
                                 onClick = {
                                     selectedDate = cell.date
+                                    // If user selects a day from adjacent month, also move the visible month accordingly
+                                    if (cell.date.year != currentYm.year || cell.date.month != currentYm.month) {
+                                        currentYm = YearMonth.of(cell.date.year, cell.date.month)
+                                    }
                                     onDayClick(cell.date)
                                 }
                             ) {
@@ -268,6 +331,9 @@ fun CalendarScreen(
                                 }
                             }
                         }
+
+                        CalendarCell.Blank -> { /* no-op, should not occur now */
+                        }
                     }
                 }
             }
@@ -284,15 +350,35 @@ private sealed interface CalendarCell {
 private fun buildMonthCells(ym: YearMonth, weekStart: DayOfWeek): List<CalendarCell> {
     val firstOfMonth = ym.atDay(1)
     val lengthOfMonth = ym.lengthOfMonth()
+
     val leadBlanks = dayOfWeekDistance(weekStart, firstOfMonth.dayOfWeek)
     val totalCells = leadBlanks + lengthOfMonth
     val rows = ceil(totalCells / 7.0).toInt()
     val paddedTotal = rows * 7
     val tailBlanks = paddedTotal - totalCells
+
+    val prevYm = ym.minusMonths(1)
+    val nextYm = ym.plusMonths(1)
+    val prevLen = prevYm.lengthOfMonth()
+
     val cells = mutableListOf<CalendarCell>()
-    repeat(leadBlanks) { cells += CalendarCell.Blank }
+
+    // Fill leading days from previous month (descending from prev end)
+    if (leadBlanks > 0) {
+        val startDay = prevLen - leadBlanks + 1
+        for (d in startDay..prevLen) {
+            cells += CalendarCell.Day(prevYm.atDay(d))
+        }
+    }
+
+    // Current month days
     for (d in 1..lengthOfMonth) cells += CalendarCell.Day(ym.atDay(d))
-    repeat(tailBlanks) { cells += CalendarCell.Blank }
+
+    // Fill trailing days from next month
+    if (tailBlanks > 0) {
+        for (d in 1..tailBlanks) cells += CalendarCell.Day(nextYm.atDay(d))
+    }
+
     return cells
 }
 
